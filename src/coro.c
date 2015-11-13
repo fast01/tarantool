@@ -37,26 +37,87 @@
 #include "small/slab_cache.h"
 #include "third_party/valgrind/memcheck.h"
 #include "diag.h"
+#include "tt_pthread.h"
 #if ENABLE_ASAN
 #include <sanitizer/asan_interface.h>
 #endif
+
+/*
+ * coro_stack_size, coro_stack_offset
+ * coro_guard_size, coro_guard_offset
+ *
+ * Stack geometry: relative placement of stack section and guard
+ * section, if any. Offsets are relative to the begining of an aligned
+ * memory block to host both stack and guard side by side.
+ *
+ * Note: we assume that the memory comes from a slab allocator and
+ * contains a slab header at the beginning we should not touch.
+ */
+static size_t    coro_page_size;
+static size_t    coro_stack_size;
+static ptrdiff_t coro_stack_offset;
+static size_t    coro_guard_size;
+static ptrdiff_t coro_guard_offset;
+
+#define CORO_STACK_GROWS_UP 0
+
+enum {
+	CORO_STACK_PAGES = 16,
+	CORO_GUARD_PAGES = 1,
+};
+
+/** Used by coro_configure */
+static pthread_once_t coro_once = PTHREAD_ONCE_INIT;
+
+static void
+coro_configure()
+{
+	coro_page_size = sysconf(_SC_PAGESIZE);
+
+	if (CORO_STACK_GROWS_UP || CORO_GUARD_PAGES == 0) {
+		coro_stack_offset = slab_sizeof();
+		coro_stack_size = coro_page_size * CORO_STACK_PAGES -
+					slab_sizeof();
+	} else {
+		coro_stack_offset = coro_page_size * (CORO_GUARD_PAGES + 1);
+		coro_stack_size = coro_page_size * CORO_STACK_PAGES;
+	}
+
+	if (CORO_GUARD_PAGES > 0) {
+		coro_guard_size = coro_page_size * CORO_GUARD_PAGES;
+#if CORO_STACK_GROWS_UP
+		coro_guard_offset = coro_page_size * stack_pages;
+#else
+		coro_guard_offset = coro_page_size;
+#endif
+	}
+}
+
+static inline void
+coro_guard_mprotect(char *stack, int prot)
+{
+	char *guard = stack - coro_stack_offset + coro_guard_offset;
+	assert((uintptr_t)guard % coro_page_size == 0);
+	mprotect(guard, coro_guard_size, prot);
+}
 
 int
 tarantool_coro_create(struct tarantool_coro *coro,
 		      struct slab_cache *slabc,
 		      void (*f) (void *), void *data)
 {
-	const int page = sysconf(_SC_PAGESIZE);
+	tt_pthread_once(&coro_once, &coro_configure);
 
 	memset(coro, 0, sizeof(*coro));
 
-	/* TODO: guard pages */
-	coro->stack_size = page * 16 - slab_sizeof();
-	coro->stack = (char *) slab_get(slabc, coro->stack_size)
-					+ slab_sizeof();
+	size_t alloc_size = MAX(
+		coro_stack_offset + coro_stack_size,
+		coro_guard_offset + coro_guard_size);
 
-	if (coro->stack == NULL) {
-		diag_set(OutOfMemory, coro->stack_size + slab_sizeof(),
+	char *mem = (char *) slab_get(slabc, alloc_size);
+
+	if (mem == NULL) {
+		diag_set(OutOfMemory, alloc_size,
 			 "runtime arena", "coro stack");
 		return -1;
 	}
@@ -64,6 +125,13 @@ tarantool_coro_create(struct tarantool_coro *coro,
 	coro->stack_id = VALGRIND_STACK_REGISTER(coro->stack,
 						 (char *) coro->stack +
 						 coro->stack_size);
+	coro->stack = mem + coro_stack_offset;
+	coro->stack_size = coro_stack_size;
+
+	(void) VALGRIND_STACK_REGISTER(coro->stack, (char *)
+				       coro->stack + coro->stack_size);
+
+	coro_guard_mprotect(coro->stack, PROT_NONE);
 
 	coro_create(&coro->ctx, f, data, coro->stack, coro->stack_size);
 	return 0;
@@ -77,7 +145,8 @@ tarantool_coro_destroy(struct tarantool_coro *coro, struct slab_cache *slabc)
 #if ENABLE_ASAN
 		ASAN_UNPOISON_MEMORY_REGION(coro->stack, coro->stack_size);
 #endif
+		coro_guard_mprotect(coro->stack, PROT_READ|PROT_WRITE);
 		slab_put(slabc, (struct slab *)
-			 ((char *) coro->stack - slab_sizeof()));
+			 ((char *) coro->stack - coro_stack_offset));
 	}
 }
