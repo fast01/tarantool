@@ -3,11 +3,6 @@ if(NOT TCLSH)
     message(FATAL_ERROR "Failed to find tclsh")
 endif()
 
-find_package(TCL)
-if(NOT TCL_FOUND)
-    message(FATAL_ERROR "Failed to find tcl development files")
-endif()
-
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
     set(SQLITE_DEBUG 1)
 endif()
