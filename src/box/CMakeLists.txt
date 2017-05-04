@@ -102,10 +102,7 @@ add_library(box STATIC
 set_source_files_properties(
     sql.c
     lua/sql.c
-    PROPERTY COMPILE_FLAGS "\
--D_HAVE_SQLITE_CONFIG_H=1 \
--I${PROJECT_SOURCE_DIR}/src/lib/sqlite/src \
--I${PROJECT_BINARY_DIR}/src/lib/sqlite/src")
+    PROPERTY COMPILE_FLAGS "-D_HAVE_SQLITE_CONFIG_H=1 -I${PROJECT_SOURCE_DIR}/src/lib/sqlite/src -I${PROJECT_BINARY_DIR}/src/lib/sqlite/src")
 
 target_link_libraries(box ${ZSTD_LIBRARIES} trnsqlite)
 
