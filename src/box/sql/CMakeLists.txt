@@ -12,7 +12,8 @@ add_custom_command(OUTPUT keywordhash.h
     COMMAND ${CMAKE_BINARY_DIR}/extra/mkkeywordhash > keywordhash.h)
 
 add_custom_command(OUTPUT parse.h parse.c
-    COMMAND ${CMAKE_BINARY_DIR}/extra/lemon -DSQLITE_OMIT_VACUUM -T${CMAKE_SOURCE_DIR}/extra/lempar.c ${SRCDIR}/parse.y
+    COMMAND [ -e parse.y ] || cp ${SRCDIR}/parse.y .
+    COMMAND ${CMAKE_BINARY_DIR}/extra/lemon -DSQLITE_OMIT_VACUUM -T${CMAKE_SOURCE_DIR}/extra/lempar.c parse.y
     COMMAND mv -f parse.h parse.h.tmp
     COMMAND ${TCLSH} ${CMAKE_SOURCE_DIR}/extra/addopcodes.tcl parse.h.tmp > parse.h
     COMMAND rm -f parse.h.tmp parse.out
@@ -37,6 +38,8 @@ add_custom_command(OUTPUT sqlite3.h
 add_definitions(-D_HAVE_SQLITE_CONFIG_H=1)
 add_definitions(-DSQLITE_MAX_WORKER_THREADS=0)
 add_definitions(-DSQLITE_OMIT_VACUUM=1)
+
+include_directories(${SRCDIR} ${CMAKE_CURRENT_BINARY_DIR})
 
 add_custom_target(generate_sql_files DEPENDS
     parse.h
