@@ -1590,7 +1590,13 @@ box_cfg_xc(void)
 		struct wal_stream wal_stream;
 		wal_stream_create(&wal_stream, cfg_geti64("rows_per_wal"));
 
-		engine_begin_initial_recovery(&checkpoint_vclock);
+		struct recovery *recovery;
+		recovery = recovery_new(cfg_gets("wal_dir"),
+					cfg_geti("force_recovery"),
+					&checkpoint_vclock);
+		auto guard = make_scoped_guard([=]{ recovery_delete(recovery); });
+
+		engine_begin_initial_recovery(&recovery->vclock);
 		MemtxEngine *memtx = (MemtxEngine *) engine_find("memtx");
 		/**
 		 * We explicitly request memtx to recover its
@@ -1600,12 +1606,6 @@ box_cfg_xc(void)
 		 * other engines.
 		 */
 		memtx->recoverSnapshot(&checkpoint_vclock);
-
-		struct recovery *recovery;
-		recovery = recovery_new(cfg_gets("wal_dir"),
-					cfg_geti("force_recovery"),
-					&checkpoint_vclock);
-		auto guard = make_scoped_guard([=]{ recovery_delete(recovery); });
 
 		struct recovery_journal journal;
 		recovery_journal_create(&journal, &recovery->vclock);
