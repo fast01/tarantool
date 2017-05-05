@@ -47,6 +47,7 @@
 static int systemd_fd = -1;
 static const char *sd_unix_path = NULL;
 
+#ifdef TARGET_OS_LINUX
 int systemd_init() {
 	sd_unix_path = getenv("NOTIFY_SOCKET");
 	if (sd_unix_path == NULL) {
@@ -119,6 +120,21 @@ int systemd_notify(const char *message) {
 	}
 	return sent;
 }
+#else /* TARGET_OS_LINUX */
+int systemd_notify(const char *message) {
+	(void )message;
+	return 0;
+}
+
+void systemd_free() {
+}
+
+int systemd_init() {
+	return 0;
+}
+
+#endif /* TARGET_OS_LINUX */
+
 
 int
 systemd_vsnotify(const char *format, va_list ap)
